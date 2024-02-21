@@ -71,3 +71,7 @@ class Bbk_Utils:
 
         # Show the plot
         plt.show()
+
+    @staticmethod
+    def mmt_strategy_name(mmt):
+        return f'mmt_{mmt}' if mmt > 0 else 'just_hold' 

@@ -29,7 +29,7 @@ class Book(object):
     def setup_book_daily(self, start_date, end_date):
         
         df = Bbk_Utils.filter_by_date(self.data,start_date,end_date)
-        added_cols = ['book_cash', 'book_token', 'book_token_net_pnl', 'day_pnl', 'book_nav', 
+        added_cols = ['book_cash', 'book_token', 'unrealised_pnl', 'book_nav', 
                       'book_max_v', 'book_drawdown', 
                       'order_id', 'daily_pnl', 'order_drawdown', 'stop_loss_limit']
         
@@ -107,12 +107,13 @@ class Book(object):
     def update_book_order(self, date, cash_available, price_T):
 
         order_id, is_order_valid = self.get_active_order(date)
-        cash_delta, token_delta, daily_pnl = 0, 0, 0
+        cash_delta, token_delta, unrealised_pnl, daily_pnl = 0, 0, 0, 0
         
         if is_order_valid == True:    
-            b_order_need_close, daily_pnl = self.orders.update_order_status(order_id, date, price_T)
+            b_order_need_close, unrealised_pnl, daily_pnl = self.orders.update_order_status(order_id, date, price_T)
             if b_order_need_close:
                 cash_delta, token_delta = self.close_order(order_id, price_T)
+                unrealised_pnl = 0
                 order_id = Orders.id_nan()
 
         else : # no position, check whether need to open
@@ -120,15 +121,15 @@ class Book(object):
             if b_new_order:
                 order_id, cash_delta, token_delta = self.open_order(new_order_scale, long_short, cash_available, price_T, date)
 
-        return cash_delta, token_delta, daily_pnl, order_id   
+        return cash_delta, token_delta, unrealised_pnl, daily_pnl, order_id   
 
 
     @staticmethod
-    def compute_book_nav(book_cash, book_token, book_token_net_pnl, price):
+    def compute_book_nav(book_cash, book_token, unrealised_pnl, price):
         if book_token >= 0 : # meaning long 
             nav = book_cash + book_token*price
         else :
-            nav = book_cash + book_token_net_pnl
+            nav = book_cash + unrealised_pnl
         return nav
             
 
@@ -137,24 +138,24 @@ class Book(object):
         df_bk = self.book
         
         # initialisation for loop:
-        book_cash, book_token, book_token_net_pnl  = self.amount, 0, 0
+        book_cash, book_token, unrealised_pnl  = self.amount, 0, 0
         
         for index, row in df_bk.iterrows():
             date = index
             price_T= row['price']
 
             cash_available = book_cash
-            cash_delta, token_delta, daily_pnl, order_id = self.update_book_order(date, cash_available, price_T)
+            cash_delta, token_delta, unrealised_pnl, daily_pnl, order_id = self.update_book_order(date, cash_available, price_T)
 
             # update circular value needed in loop
             book_cash = book_cash + cash_delta
             book_token =  book_token + token_delta
-            book_token_net_pnl =  book_token_net_pnl + daily_pnl
-            book_nav = Book.compute_book_nav(book_cash, book_token,book_token_net_pnl, price_T)
+            unrealised_pnl =  unrealised_pnl + daily_pnl
+            book_nav = Book.compute_book_nav(book_cash, book_token,unrealised_pnl, price_T)
             
             # update book details section:
-            book_cols_names = ['book_cash', 'book_token', 'book_token_net_pnl', 'day_pnl', 'book_nav']
-            book_cols_val = [book_cash, book_token, book_token_net_pnl, daily_pnl, book_nav]
+            book_cols_names = ['book_cash', 'book_token', 'unrealised_pnl', 'book_nav', 'daily_pnl']
+            book_cols_val = [book_cash, book_token, unrealised_pnl, book_nav, daily_pnl]
             row[book_cols_names] = book_cols_val
             
             # update order details section:
@@ -168,7 +169,8 @@ class Book(object):
         df_bk['nav_returns'] = np.log(df_bk['book_nav']/df_bk['book_nav'].shift(1))
         df_bk['cstrategy'] = df_bk['nav_returns'].cumsum().apply(lambda x: np.exp(x)-1)
         df_bk['creturns'] = df_bk['returns'].cumsum().apply(lambda x: np.exp(x)-1) 
-        return df_bk
+        
+        return df_bk, self.orders.df_orders
 
 
     def run_strategy(self, start_out, end_out, invest_amt  = 1000,  mmt_list = [30], vlt_list = [7, 180]):
@@ -191,7 +193,13 @@ class Book(object):
         return df_bk
     
     
-    
+    def show(self, rst_dict = {'cstrategy':'our strategy', 'creturns':'just hold'} ):
+        df_bk = self.book
+        cols_list = list(rst_dict.keys())
+        df_rst = df_bk[cols_list].copy()
+        df_rst.rename(columns=rst_dict, inplace=True)
+        df_rst.plot()
+        plt.show() 
     
 
 if __name__ == "__main__":
@@ -201,13 +209,13 @@ if __name__ == "__main__":
         import pandas as pd
 
         mb = Book('btc')
-
         ip = InvestPerformance()
-        df_bk = mb.run_strategy( '2021-01-01', '2023-12-31', invest_amt  = 1000, mmt_list = [30], vlt_list = [7, 180])
-        df_orders = mb.orders.df_orders
-        df_orders.to_clipboard()
+        df_bk, df_orders = mb.run_strategy( '2021-01-01', '2023-12-31', invest_amt  = 1000, mmt_list = [30], vlt_list = [7, 180])
+        df_rst = ip.evaluate(df_bk, return_cols=['nav_returns', 'returns'], return_labels=['Our Strategy', 'Just hold'])
+        print("performance:")
+        print(df_rst)
+        print("orders:")
         print(df_orders)
-        
-        df_bk[[ 'cstrategy', 'creturns']].plot()
-        plt.show()
+
+        mb.show()
 

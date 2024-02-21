@@ -11,7 +11,7 @@ class Orders(object):
                       'entry_date', 'highest_ptf_date', 'last_date',
                       'entry_price', 'highest_ptf_price', 'last_price', 
                       'entry_ptf_v', 'highest_ptf_v', 'last_ptf_v',
-                      'order_drawdown',  'max_pnl', 'running_pnl', 'stop_loss_limit'
+                      'max_pnl', 'order_drawdown',   'unrealised_pnl', 'stop_loss_limit'
                         ]
         self.df_orders = pd.DataFrame(columns=order_cols)
         self.total_orders = 0
@@ -31,7 +31,7 @@ class Orders(object):
             'entry_date': date, 'highest_ptf_date': date, 'last_date': None,
             'entry_price': entry_price, 'highest_ptf_price': entry_price, 'last_price': entry_price,
             'entry_ptf_v' : init_ptf_v, 'highest_ptf_v': init_ptf_v, 'last_ptf_v':init_ptf_v,
-            'order_drawdown' : 0, 'running_pnl': 0, 'max_pnl':0,
+            'order_drawdown' : 0.0, 'unrealised_pnl': 0.0, 'max_pnl':0.0,
             'stop_loss_limit': stop_loss_limit
         }
         df.loc[order_id] = new_row_data
@@ -45,7 +45,7 @@ class Orders(object):
         order  = self.get_set_order(order_id)
         token_size = order['size']
         long_short = order['long_short']
-        order_total_pnl = order['running_pnl']
+        order_total_pnl = order['unrealised_pnl']
         
         if(long_short == 1) : # long position
             cash_delta = token_size*price 
@@ -78,6 +78,7 @@ class Orders(object):
 
         ptf_v_T =long_short* pos_token* price_T        
         daily_pnl = ptf_v_T - ptf_v_Tm1
+        unrealised_pnl = ptf_v_T -  entry_ptf_v
         
         if(ptf_v_T > highest_ptf_v):
             highest_ptf_v = ptf_v_T
@@ -91,7 +92,7 @@ class Orders(object):
         order['last_price'] = price_T
         order['last_ptf_v'] = ptf_v_T
         order['order_drawdown'] = ptf_v_T - highest_ptf_v
-        order['running_pnl'] =  ptf_v_T -  entry_ptf_v
+        order['unrealised_pnl'] =  unrealised_pnl
         
         order['b_closed'] =  order['order_drawdown'] < stop_loss_limit
         
@@ -100,7 +101,7 @@ class Orders(object):
         
         order_id = order_id if order['b_closed'] == False else Orders.id_nan()
 
-        return order['b_closed'], daily_pnl
+        return order['b_closed'], unrealised_pnl,  daily_pnl
 
     def get_set_order(self, order_id, order_row = None):
         
@@ -108,7 +109,7 @@ class Orders(object):
             return None
         
         if order_row is None:
-            order_row = self.df_orders.loc[order_id]
+            order_row = self.df_orders.loc[order_id].to_dict()
         else:
             self.df_orders.loc[order_id] = order_row
         return order_row
